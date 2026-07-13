@@ -388,7 +388,7 @@ uint16_t getIconColor(const String& iconCode) {
     } else if (iconCode.startsWith("02") || iconCode.startsWith("03") || iconCode.startsWith("04")) {
         color = TFT_LIGHTGREY; // Cloudy
     } else if (iconCode.startsWith("09") || iconCode.startsWith("10") || iconCode.startsWith("11")) {
-        color = TFT_BLUE; // Rainy
+        color = TFT_DARKCYAN; // Rainy
     } else if (iconCode.startsWith("50")) {
         color = TFT_CYAN; // Windy
     } else {
@@ -542,7 +542,7 @@ void renderWeatherUI(const WeatherData& data) {
     tft.drawString(formatWeatherTime(data.dt, data.timezoneSeconds), 305, 48);
     tft.setTextDatum(TL_DATUM);
 
-    tft.setTextColor(data.temperatureF < 74.0f ? TFT_BLUE : data.temperatureF > 84.0f ? TFT_RED : TFT_YELLOW, TFT_BLACK);
+    tft.setTextColor(data.temperatureF < 74.0f ? TFT_DARKCYAN : data.temperatureF > 84.0f ? TFT_PINK : TFT_YELLOW, TFT_BLACK);
     tft.setTextSize(4);
     tft.drawString(String((int)data.temperatureF) + " F", 15, 55);
 
@@ -562,7 +562,7 @@ void renderWeatherUI(const WeatherData& data) {
     tft.drawString("Humidity: " + String(data.humidity) + "%", 15, 190);
     tft.drawString("Wind: " + String(data.windSpeed) + " mph", 15, 215);
 
-    drawScaledWeatherIcon(216, 165, 96, 96, data.iconCode);
+    drawScaledWeatherIcon(216, 170, 96, 96, data.iconCode);
 }
 
 void displayStatusMessage(const String& message, uint16_t color) {
