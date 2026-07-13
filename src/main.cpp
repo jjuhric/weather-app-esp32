@@ -217,7 +217,7 @@ bool handleMessageRequest() {
         client.println("Content-Type: application/json");
         client.println("Connection: close");
         client.println();
-        client.println("{\"ok\":false,\"error\":\"message exceeds max length\"}");
+        client.println("{\"ok\":false,\"error\":\"message exceeds max length " + String(kMaxMessageChars) + " by " + String(messageValue.length() - kMaxMessageChars) + " characters\"}");
         client.stop();
         return true;
     }
