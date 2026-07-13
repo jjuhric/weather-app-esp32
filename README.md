@@ -6,6 +6,7 @@ This project displays weather information on an SPI TFT using an ESP32.
 - Platform: ESP32 (tested with `esp32dev`/`esp32_cyd` PlatformIO environment)
 - Display: ILI9341-compatible SPI TFT using `TFT_eSPI`
 - Weather API: OpenWeather (current weather)
+- Message Display: HTTP POST `/message` endpoint for custom messages with animations
 
 ## Quick start
 1. Install PlatformIO in VS Code or use the PlatformIO Core CLI.
@@ -31,6 +32,45 @@ This project displays weather information on an SPI TFT using an ESP32.
    ```sh
    python -m platformio device monitor --environment esp32_cyd
    ```
+
+## Message Endpoint
+
+The device hosts a simple HTTP server on port 80 with a `/message` endpoint that allows you to send custom messages to the display.
+
+### POST /message
+
+Send a JSON or plain-text message to display on the screen:
+
+```powershell
+# JSON format (recommended)
+Invoke-RestMethod -Method Post -Uri "http://<device-ip>/message" `
+  -ContentType "application/json" `
+  -Body '{"message":"Hello, World!"}'
+
+# Plain text format
+Invoke-RestMethod -Method Post -Uri "http://<device-ip>/message" `
+  -ContentType "text/plain" `
+  -Body "Hello, World!"
+```
+
+### Message Requirements
+- **Max length:** 240 characters
+- **Line wrapping:** 24 characters per line, max 10 lines
+- **Word wrapping:** Messages are word-wrapped (no mid-word breaks)
+
+### Display Behavior
+1. **Flash sequence (1.5 seconds):** Full screen flashes RED → WHITE → BLUE → RED → WHITE → BLUE
+2. **Message display:** Message appears on black background with white text
+   - Duration: 3 seconds base + 1 second per line (e.g., 4 lines = 7 seconds)
+3. **Exit sequence (0.75 seconds):** Full screen flashes RED → WHITE → BLUE
+4. **Return to weather:** Automatically returns to weather display
+
+### Interrupting the Message
+Touch anywhere on the screen to immediately dismiss the message and return to the weather display.
+
+### Response Codes
+- `200 OK`: Message accepted and will be displayed
+- `413 Payload Too Large`: Message exceeds max length or exceeds max lines when word-wrapped
 
 ## Board support
 - This project is configured for `board = esp32dev` in `platformio.ini` (environment `esp32_cyd`).

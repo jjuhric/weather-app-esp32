@@ -17,8 +17,10 @@ constexpr int kMessageStartX = 15;
 constexpr int kMessageStartY = 15;
 constexpr int kMessageLineHeight = 21;
 constexpr int kMessageMaxY = 215;
-constexpr unsigned long kMessageHoldMs = 5000UL;
+constexpr unsigned long kMessageBaseHoldMs = 3000UL;  // Base hold time
+constexpr unsigned long kMessageHoldMsPerLine = 1000UL;  // Additional time per line
 constexpr unsigned long kMessageFlashMs = 250UL;
+unsigned long messageHoldMs = 5000UL;  // Will be calculated per message
 
 WiFiServer messageServer(80);
 String pendingMessage;
@@ -35,27 +37,55 @@ bool weatherRendered = false;
 bool weatherDataReady = false;
 bool messageScreenRendered = false;
 
-void drawMessageToScreen(const String& message) {
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setTextDatum(TL_DATUM);
-
-    int currentIndex = 0;
-    int lineIndex = 0;
-    while (currentIndex < static_cast<int>(message.length()) && lineIndex < kMaxMessageLines) {
-        int nextIndex = currentIndex + 24;
-        if (nextIndex > static_cast<int>(message.length())) {
-            nextIndex = static_cast<int>(message.length());
-        }
-        String line = message.substring(currentIndex, nextIndex);
-        int y = kMessageStartY + (lineIndex * kMessageLineHeight);
-        if (y <= kMessageMaxY) {
-            tft.drawString(line, kMessageStartX, y);
-        }
-        currentIndex = nextIndex;
-        ++lineIndex;
+// Calculate how many lines a message will take when word-wrapped (24 chars per line, 10 lines max)
+int calculateMessageLineCount(const String& message) {
+    if (message.isEmpty()) {
+        return 0;
     }
+
+    int currentLineLength = 0;
+    int lineCount = 1;
+    int i = 0;
+    
+    while (i < static_cast<int>(message.length())) {
+        // Skip leading spaces
+        while (i < static_cast<int>(message.length()) && message[i] == ' ') {
+            i++;
+        }
+        
+        if (i >= static_cast<int>(message.length())) {
+            break;
+        }
+        
+        // Find end of word
+        int wordStart = i;
+        while (i < static_cast<int>(message.length()) && message[i] != ' ') {
+            i++;
+        }
+        
+        int wordLength = i - wordStart;
+        
+        // Try to fit word on current line
+        if (currentLineLength == 0) {
+            // First word on line
+            currentLineLength = wordLength;
+        } else if (currentLineLength + 1 + wordLength <= 24) {
+            // Word fits with a space
+            currentLineLength += 1 + wordLength;
+        } else {
+            // Word doesn't fit, start new line
+            lineCount++;
+            currentLineLength = wordLength;
+        }
+    }
+    
+    return lineCount;
+}
+
+// Validate message can be word-wrapped within max lines (24 chars per line, 10 lines max)
+// Returns true if message fits; false if it would exceed kMaxMessageLines
+bool validateMessageWrapping(const String& message) {
+    return calculateMessageLineCount(message) <= kMaxMessageLines;
 }
 
 void resetMessageDisplay() {
@@ -64,26 +94,57 @@ void resetMessageDisplay() {
     messagePhase = 0;
 }
 
+// Display message with proper word wrapping (24 chars per line, 10 lines max)
 void drawMessageOverlay(const String& message) {
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextSize(2);
     tft.setTextDatum(TL_DATUM);
 
-    int currentIndex = 0;
     int lineIndex = 0;
-    while (currentIndex < static_cast<int>(message.length()) && lineIndex < kMaxMessageLines) {
-        int nextIndex = currentIndex + 24;
-        if (nextIndex > static_cast<int>(message.length())) {
-            nextIndex = static_cast<int>(message.length());
+    int i = 0;
+    String currentLine;
+    
+    while (i < static_cast<int>(message.length()) && lineIndex < kMaxMessageLines) {
+        // Skip leading spaces
+        while (i < static_cast<int>(message.length()) && message[i] == ' ') {
+            i++;
         }
-        String line = message.substring(currentIndex, nextIndex);
+        
+        if (i >= static_cast<int>(message.length())) {
+            break;
+        }
+        
+        // Find end of word
+        int wordStart = i;
+        while (i < static_cast<int>(message.length()) && message[i] != ' ') {
+            i++;
+        }
+        
+        String word = message.substring(wordStart, i);
+        
+        // Try to fit word on current line
+        if (currentLine.isEmpty()) {
+            currentLine = word;
+        } else if (currentLine.length() + 1 + word.length() <= 24) {
+            currentLine += " " + word;
+        } else {
+            // Draw current line and start new one
+            int y = kMessageStartY + (lineIndex * kMessageLineHeight);
+            if (y <= kMessageMaxY) {
+                tft.drawString(currentLine, kMessageStartX, y);
+            }
+            lineIndex++;
+            currentLine = word;
+        }
+    }
+    
+    // Draw final line if there's content
+    if (!currentLine.isEmpty() && lineIndex < kMaxMessageLines) {
         int y = kMessageStartY + (lineIndex * kMessageLineHeight);
         if (y <= kMessageMaxY) {
-            tft.drawString(line, kMessageStartX, y);
+            tft.drawString(currentLine, kMessageStartX, y);
         }
-        currentIndex = nextIndex;
-        ++lineIndex;
     }
 }
 
@@ -150,6 +211,7 @@ bool handleMessageRequest() {
 
     messageValue.trim();
 
+    // Validate raw message length first
     if (messageValue.length() > kMaxMessageChars) {
         client.println("HTTP/1.1 413 Payload Too Large");
         client.println("Content-Type: application/json");
@@ -159,6 +221,21 @@ bool handleMessageRequest() {
         client.stop();
         return true;
     }
+    
+    // Validate message can be word-wrapped within max lines
+    if (!validateMessageWrapping(messageValue)) {
+        client.println("HTTP/1.1 413 Payload Too Large");
+        client.println("Content-Type: application/json");
+        client.println("Connection: close");
+        client.println();
+        client.println("{\"ok\":false,\"error\":\"message exceeds max lines when word-wrapped\"}");
+        client.stop();
+        return true;
+    }
+
+    // Calculate hold time: 3 seconds base + 1 second per line
+    int lineCount = calculateMessageLineCount(messageValue);
+    messageHoldMs = kMessageBaseHoldMs + (lineCount * kMessageHoldMsPerLine);
 
     pendingMessage = messageValue;
     displayMode = DisplayModeMessage;
@@ -231,7 +308,7 @@ void loop() {
                 drawMessageOverlay(pendingMessage);
             }
         } else if (messagePhase == 1) {
-            if (millis() - messagePhaseStartedMs >= kMessageHoldMs) {
+            if (millis() - messagePhaseStartedMs >= messageHoldMs) {
                 messagePhase = 2;
                 messagePhaseStartedMs = millis();
                 tft.fillScreen(TFT_RED);
