@@ -562,7 +562,7 @@ void renderWeatherUI(const WeatherData& data) {
     tft.drawString("Humidity: " + String(data.humidity) + "%", 15, 190);
     tft.drawString("Wind: " + String(data.windSpeed) + " mph", 15, 215);
 
-    drawScaledWeatherIcon(216, 170, 96, 96, data.iconCode);
+    drawScaledWeatherIcon(216, 160, 96, 96, data.iconCode);
 }
 
 void displayStatusMessage(const String& message, uint16_t color) {
