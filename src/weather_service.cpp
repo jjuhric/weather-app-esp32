@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
+#include <time.h>
 #include "secrets.h"
 #include "weather_service.h"
 #include "weather_types.h"
@@ -380,10 +381,26 @@ void drawScaledBitmap(int x, int y, const unsigned char* bitmap, int w, int h, i
     }
 }
 
+uint16_t getIconColor(const String& iconCode) {
+    uint16_t color;
+    if (iconCode.startsWith("01")) {
+        color = TFT_YELLOW; // Sunny
+    } else if (iconCode.startsWith("02") || iconCode.startsWith("03") || iconCode.startsWith("04")) {
+        color = TFT_LIGHTGREY; // Cloudy
+    } else if (iconCode.startsWith("09") || iconCode.startsWith("10") || iconCode.startsWith("11")) {
+        color = TFT_BLUE; // Rainy
+    } else if (iconCode.startsWith("50")) {
+        color = TFT_CYAN; // Windy
+    } else {
+        color = TFT_WHITE; // Default
+    }
+    return color;
+}
+
 // Select and draw the appropriate bitmap, scaled to fill the region
 void drawScaledWeatherIcon(int x, int y, int newW, int newH, const String& iconCode) {
     const unsigned char* targetBitmap = bitmap_warning_64;
-    uint16_t iconColor = TFT_WHITE; // force white to match photo
+    uint16_t iconColor = getIconColor(iconCode); // Use the revised function
 
 
     if (iconCode.startsWith("01")) {
@@ -398,6 +415,28 @@ void drawScaledWeatherIcon(int x, int y, int newW, int newH, const String& iconC
 
     // Draw without masking (use corrected bitmaps)
     drawScaledBitmap(x, y, targetBitmap, 64, 64, newW, newH, iconColor);
+}
+
+String formatWeatherDate(long long unixTimeUtc, long long timezoneSeconds) {
+    time_t timestamp = static_cast<time_t>(unixTimeUtc + timezoneSeconds);
+    struct tm* timeInfo = gmtime(&timestamp);
+    char buffer[48];
+    if (timeInfo != nullptr) {
+        strftime(buffer, sizeof(buffer), "%B %d, %Y", timeInfo);
+        return String(buffer);
+    }
+    return "N/A";
+}
+
+String formatWeatherTime(long long unixTimeUtc, long long timezoneSeconds) {
+    time_t timestamp = static_cast<time_t>(unixTimeUtc + timezoneSeconds);
+    struct tm* timeInfo = gmtime(&timestamp);
+    char buffer[24];
+    if (timeInfo != nullptr) {
+        strftime(buffer, sizeof(buffer), "%I:%M:%S %p", timeInfo);
+        return String(buffer);
+    }
+    return "N/A";
 }
 }  // namespace
 
@@ -459,8 +498,13 @@ bool fetchWeatherData(WeatherData& data, String& statusMessage) {
         data.city = "Calhoun";
     }
 
+    data.dt = doc["dt"].as<long long>();
+    data.timezoneSeconds = doc["timezone"].as<long long>();
+
     data.temperatureF = doc["main"]["temp"].as<float>();
     data.feelsLikeF = doc["main"]["feels_like"].as<float>();
+    data.minTempF = doc["main"]["temp_min"].as<float>();
+    data.maxTempF = doc["main"]["temp_max"].as<float>();
     data.humidity = doc["main"]["humidity"].as<int>();
     data.windSpeed = doc["wind"]["speed"].as<float>();
 
@@ -483,26 +527,42 @@ void renderWeatherUI(const WeatherData& data) {
 
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextSize(2);
+    tft.setTextDatum(TL_DATUM);
     tft.drawString(data.city, 15, 15);
-    tft.drawFastHLine(15, 42, 290, TFT_DARKGREY);
 
-    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(formatWeatherDate(data.dt, data.timezoneSeconds), 305, 15);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawFastHLine(15, 42, 290, TFT_DARKGREY);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(formatWeatherTime(data.dt, data.timezoneSeconds), 305, 48);
+    tft.setTextDatum(TL_DATUM);
+
+    tft.setTextColor(data.temperatureF < 74.0f ? TFT_BLUE : data.temperatureF > 84.0f ? TFT_RED : TFT_YELLOW, TFT_BLACK);
     tft.setTextSize(4);
     tft.drawString(String((int)data.temperatureF) + " F", 15, 55);
 
-    tft.setTextColor(TFT_GOLD, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.drawString("Feels like: " + String((int)data.feelsLikeF) + " F", 127, 70);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.drawString("Min: " + String((int)data.minTempF) + " / Max: " + String((int)data.maxTempF), 15, 95);
 
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(3);
+    tft.drawString(data.description, 15, 120);
+
+    tft.setTextColor(TFT_GOLD, TFT_BLACK);
     tft.setTextSize(2);
-    tft.drawString(data.description, 15, 115);
+    tft.drawString("Feels like: " + String((int)data.feelsLikeF) + " F", 15, 165);
 
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawString("Humidity: " + String(data.humidity) + "%", 15, 155);
-    tft.drawString("Wind: " + String(data.windSpeed) + " mph", 15, 190);
+    tft.drawString("Humidity: " + String(data.humidity) + "%", 15, 190);
+    tft.drawString("Wind: " + String(data.windSpeed) + " mph", 15, 215);
 
-    drawScaledWeatherIcon(216, 120, 96, 96, data.iconCode);
+    drawScaledWeatherIcon(216, 165, 96, 96, data.iconCode);
 }
 
 void displayStatusMessage(const String& message, uint16_t color) {
