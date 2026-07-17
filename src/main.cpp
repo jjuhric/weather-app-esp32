@@ -148,7 +148,15 @@ void drawMessageOverlay(const String& message) {
     }
 }
 
-bool handleMessageRequest() {
+void sendJsonResponse(WiFiClient& client, const String& statusLine, const String& body) {
+    client.println(statusLine);
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.println(body);
+}
+
+bool handleHttpRequest() {
     if (WiFi.status() != WL_CONNECTED) {
         return false;
     }
@@ -163,18 +171,19 @@ bool handleMessageRequest() {
     String requestLine = client.readStringUntil('\n');
     requestLine.trim();
 
-    if (!requestLine.startsWith("POST /message")) {
-        client.println("HTTP/1.1 404 Not Found");
-        client.println("Content-Type: text/plain");
-        client.println("Connection: close");
-        client.println();
-        client.println("Not Found");
+    int firstSpace = requestLine.indexOf(' ');
+    int secondSpace = requestLine.indexOf(' ', firstSpace + 1);
+    if (firstSpace < 0 || secondSpace < 0) {
+        sendJsonResponse(client, "HTTP/1.1 400 Bad Request", "{\"ok\":false,\"error\":\"invalid request line\"}");
         client.stop();
         return true;
     }
 
+    String method = requestLine.substring(0, firstSpace);
+    String path = requestLine.substring(firstSpace + 1, secondSpace);
+
     int contentLength = 0;
-    while (client.connected() && client.available()) {
+    while (client.connected()) {
         String headerLine = client.readStringUntil('\n');
         if (headerLine == "\r" || headerLine == "\n" || headerLine.length() == 0) {
             break;
@@ -183,6 +192,32 @@ bool handleMessageRequest() {
         if (headerLine.startsWith("Content-Length:")) {
             contentLength = headerLine.substring(15).toInt();
         }
+    }
+
+    if (method == "GET" && path == "/health") {
+        bool wifiConnected = WiFi.status() == WL_CONNECTED;
+        bool internetConnected = isInternetReachable();
+        String ipAddress = wifiConnected ? WiFi.localIP().toString() : String("0.0.0.0");
+        int httpStatusCode = (wifiConnected && internetConnected) ? 200 : 503;
+
+        String body =
+            String("{\"ok\":") + ((wifiConnected && internetConnected) ? "true" : "false") +
+            String(",\"wifiConnected\":") + (wifiConnected ? "true" : "false") +
+            String(",\"internetConnected\":") + (internetConnected ? "true" : "false") +
+            String(",\"deviceReachable\":true") +
+            String(",\"ip\":\"") + ipAddress + String("\"") +
+            String(",\"uptimeMs\":") + String(millis()) +
+            String("}");
+
+        sendJsonResponse(client, httpStatusCode == 200 ? "HTTP/1.1 200 OK" : "HTTP/1.1 503 Service Unavailable", body);
+        client.stop();
+        return true;
+    }
+
+    if (!(method == "POST" && path == "/message")) {
+        sendJsonResponse(client, "HTTP/1.1 404 Not Found", "{\"ok\":false,\"error\":\"not found\"}");
+        client.stop();
+        return true;
     }
 
     String body;
@@ -213,22 +248,14 @@ bool handleMessageRequest() {
 
     // Validate raw message length first
     if (messageValue.length() > kMaxMessageChars) {
-        client.println("HTTP/1.1 413 Payload Too Large");
-        client.println("Content-Type: application/json");
-        client.println("Connection: close");
-        client.println();
-        client.println("{\"ok\":false,\"error\":\"message exceeds max length " + String(kMaxMessageChars) + " by " + String(messageValue.length() - kMaxMessageChars) + " characters\"}");
+        sendJsonResponse(client, "HTTP/1.1 413 Payload Too Large", "{\"ok\":false,\"error\":\"message exceeds max length " + String(kMaxMessageChars) + " by " + String(messageValue.length() - kMaxMessageChars) + " characters\"}");
         client.stop();
         return true;
     }
     
     // Validate message can be word-wrapped within max lines
     if (!validateMessageWrapping(messageValue)) {
-        client.println("HTTP/1.1 413 Payload Too Large");
-        client.println("Content-Type: application/json");
-        client.println("Connection: close");
-        client.println();
-        client.println("{\"ok\":false,\"error\":\"message exceeds max lines when word-wrapped\"}");
+        sendJsonResponse(client, "HTTP/1.1 413 Payload Too Large", "{\"ok\":false,\"error\":\"message exceeds max lines when word-wrapped\"}");
         client.stop();
         return true;
     }
@@ -242,11 +269,7 @@ bool handleMessageRequest() {
     messageScreenRendered = false;
     resetMessageDisplay();
 
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-Type: application/json");
-    client.println("Connection: close");
-    client.println();
-    client.println("{\"ok\":true}");
+    sendJsonResponse(client, "HTTP/1.1 200 OK", "{\"ok\":true}");
     client.stop();
     return true;
 }
@@ -279,7 +302,7 @@ void setup() {
 
 void loop() {
     if (millis() - lastMessagePollMs >= 250 && WiFi.status() == WL_CONNECTED) {
-        handleMessageRequest();
+        handleHttpRequest();
         lastMessagePollMs = millis();
     }
 
