@@ -565,7 +565,7 @@ void renderWeatherUI(const WeatherData& data) {
     tft.drawString("Min: " + String((int)data.minTempF) + " / Max: " + String((int)data.maxTempF), 15, 95);
 
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextSize(3);
+    tft.setTextSize(data.description.length() > 17 ? 2 : 3);
     tft.drawString(data.description, 15, 120);
 
     tft.setTextColor(TFT_GOLD, TFT_BLACK);
