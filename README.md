@@ -78,6 +78,22 @@ Touch anywhere on the screen to toggle the display backlight off or on.
 - `200 OK`: Message accepted and will be displayed
 - `413 Payload Too Large`: Message exceeds max length or exceeds max lines when word-wrapped
 
+## Screen Control Endpoint
+
+### POST /screen
+
+Toggle the screen on or off using the same behavior as a touch event:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://<device-ip>/screen" `
+  -ContentType "application/json" `
+  -Body '{"action":"toggle screen"}'
+```
+
+### Screen Control Response Codes
+- `200 OK`: Screen state toggled successfully
+- `400 Bad Request`: Invalid or unsupported request body
+
 ## Board support
 - This project is configured for `board = esp32dev` in `platformio.ini` (environment `esp32_cyd`).
 - It should work as-is on most ESP32 dev boards that expose the same SPI pins.

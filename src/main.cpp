@@ -255,18 +255,23 @@ void turnScreenOn() {
     }
 }
 
+void toggleScreenState() {
+    if (screenOn) {
+        turnScreenOff();
+    } else {
+        turnScreenOn();
+    }
+
+    updateStatusLed();
+}
+
 void handleScreenTouchToggle() {
     const bool isTouched = touch.tirqTouched() && touch.touched();
 
     if (isTouched && !touchActive && (millis() - lastTouchToggleMs >= kTouchToggleDebounceMs)) {
         touchActive = true;
         lastTouchToggleMs = millis();
-        if (screenOn) {
-            turnScreenOff();
-        } else {
-            turnScreenOn();
-        }
-        updateStatusLed();
+        toggleScreenState();
     } else if (!isTouched) {
         touchActive = false;
     }
@@ -392,7 +397,7 @@ bool handleHttpRequest() {
         return true;
     }
 
-    if (!(method == "POST" && path == "/message")) {
+    if (!(method == "POST" && (path == "/message" || path == "/screen"))) {
         sendJsonResponse(client, "HTTP/1.1 404 Not Found", "{\"ok\":false,\"error\":\"not found\"}");
         client.stop();
         return true;
@@ -408,6 +413,38 @@ bool handleHttpRequest() {
     }
 
     body.trim();
+
+    if (path == "/screen") {
+        if (!body.startsWith("{")) {
+            sendJsonResponse(client, "HTTP/1.1 400 Bad Request", "{\"ok\":false,\"error\":\"expected JSON body\"}");
+            client.stop();
+            return true;
+        }
+
+        JsonDocument doc;
+        DeserializationError error = deserializeJson(doc, body);
+        if (error || !doc["action"].is<String>()) {
+            sendJsonResponse(client, "HTTP/1.1 400 Bad Request", "{\"ok\":false,\"error\":\"invalid JSON body\"}");
+            client.stop();
+            return true;
+        }
+
+        String actionValue = doc["action"].as<String>();
+        actionValue.trim();
+        actionValue.toLowerCase();
+        if (actionValue != "toggle screen") {
+            sendJsonResponse(client, "HTTP/1.1 400 Bad Request", "{\"ok\":false,\"error\":\"unsupported action\"}");
+            client.stop();
+            return true;
+        }
+
+        lastTouchToggleMs = millis();
+        touchActive = false;
+        toggleScreenState();
+        sendJsonResponse(client, "HTTP/1.1 200 OK", String("{\"ok\":true,\"screenOn\":") + (screenOn ? "true" : "false") + "}");
+        client.stop();
+        return true;
+    }
 
     String messageValue;
     if (body.startsWith("{")) {
