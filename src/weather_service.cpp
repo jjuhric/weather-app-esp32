@@ -84,6 +84,132 @@ namespace
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+    void drawMoonIcon(int x, int y, int newW, int newH, uint16_t color)
+    {
+        const int diameter = min(newW, newH);
+        const int radius = diameter / 2;
+        const int centerX = x + (newW / 2);
+        const int centerY = y + (newH / 2);
+        const int cutoutOffset = max(6, diameter / 5);
+        const int cutoutRadius = max(4, radius - (diameter / 8));
+
+        tft.fillCircle(centerX, centerY, radius, color);
+        tft.fillCircle(centerX + cutoutOffset, centerY - cutoutOffset, cutoutRadius, TFT_BLACK);
+    }
+
+    void drawThickLine(int x0, int y0, int x1, int y1, int thickness, uint16_t color)
+    {
+        const int halfThickness = max(1, thickness / 2);
+        const int deltaX = abs(x1 - x0);
+        const int deltaY = abs(y1 - y0);
+
+        for (int offset = -halfThickness; offset <= halfThickness; ++offset)
+        {
+            if (deltaX >= deltaY)
+            {
+                tft.drawLine(x0, y0 + offset, x1, y1 + offset, color);
+            }
+            else
+            {
+                tft.drawLine(x0 + offset, y0, x1 + offset, y1, color);
+            }
+        }
+    }
+
+    void drawSunIcon(int x, int y, int newW, int newH, uint16_t color)
+    {
+        const int diameter = min(newW, newH);
+        const int centerX = x + (newW / 2);
+        const int centerY = y + (newH / 2);
+        const int coreRadius = diameter / 4;
+        const int rayInner = coreRadius + max(4, diameter / 14);
+        const int rayOuter = (diameter / 2) - max(4, diameter / 12);
+        const int rayThickness = max(2, diameter / 16);
+        const int diagonalInner = max(1, (rayInner * 7) / 10);
+        const int diagonalOuter = max(diagonalInner + 1, (rayOuter * 7) / 10);
+
+        tft.fillCircle(centerX, centerY, coreRadius, color);
+        tft.fillRoundRect(centerX - (rayThickness / 2), centerY - rayOuter, rayThickness, rayOuter - rayInner, rayThickness / 2, color);
+        tft.fillRoundRect(centerX - (rayThickness / 2), centerY + rayInner, rayThickness, rayOuter - rayInner, rayThickness / 2, color);
+        tft.fillRoundRect(centerX - rayOuter, centerY - (rayThickness / 2), rayOuter - rayInner, rayThickness, rayThickness / 2, color);
+        tft.fillRoundRect(centerX + rayInner, centerY - (rayThickness / 2), rayOuter - rayInner, rayThickness, rayThickness / 2, color);
+        drawThickLine(centerX - diagonalInner, centerY - diagonalInner, centerX - diagonalOuter, centerY - diagonalOuter, rayThickness, color);
+        drawThickLine(centerX + diagonalInner, centerY - diagonalInner, centerX + diagonalOuter, centerY - diagonalOuter, rayThickness, color);
+        drawThickLine(centerX - diagonalInner, centerY + diagonalInner, centerX - diagonalOuter, centerY + diagonalOuter, rayThickness, color);
+        drawThickLine(centerX + diagonalInner, centerY + diagonalInner, centerX + diagonalOuter, centerY + diagonalOuter, rayThickness, color);
+    }
+
+    void drawCloudIcon(int x, int y, int newW, int newH, uint16_t color)
+    {
+        const int centerX = x + (newW / 2);
+        const int baseY = y + ((newH * 58) / 100);
+        const int baseWidth = (newW * 72) / 100;
+        const int baseHeight = max(12, (newH * 22) / 100);
+        const int baseX = centerX - (baseWidth / 2);
+        const int radiusLarge = max(12, newH / 5);
+        const int radiusMedium = max(10, newH / 6);
+        const int radiusSmall = max(8, newH / 7);
+
+        tft.fillCircle(centerX - (newW / 5), baseY, radiusMedium, color);
+        tft.fillCircle(centerX, baseY - (newH / 10), radiusLarge, color);
+        tft.fillCircle(centerX + (newW / 5), baseY, radiusSmall, color);
+        tft.fillRoundRect(baseX, baseY, baseWidth, baseHeight, baseHeight / 2, color);
+    }
+
+    void drawRainIcon(int x, int y, int newW, int newH, uint16_t color)
+    {
+        const int cloudHeight = (newH * 58) / 100;
+        const int dropTop = y + cloudHeight;
+        const int dropLength = max(10, newH / 5);
+        const int dropThickness = max(2, newW / 24);
+        const int leftX = x + (newW * 26) / 100;
+        const int midX = x + (newW * 50) / 100;
+        const int rightX = x + (newW * 74) / 100;
+
+        drawCloudIcon(x, y, newW, cloudHeight, TFT_LIGHTGREY);
+        drawThickLine(leftX, dropTop, leftX - (newW / 18), dropTop + dropLength, dropThickness, color);
+        drawThickLine(midX, dropTop + (newH / 18), midX - (newW / 18), dropTop + dropLength + (newH / 18), dropThickness, color);
+        drawThickLine(rightX, dropTop, rightX - (newW / 18), dropTop + dropLength, dropThickness, color);
+    }
+
+    void drawWindIcon(int x, int y, int newW, int newH, uint16_t color)
+    {
+        const int lineThickness = max(6, newH / 10);
+        const int firstY = y + (newH * 32) / 100;
+        const int secondY = y + (newH * 50) / 100;
+        const int thirdY = y + (newH * 68) / 100;
+        const int firstX = x + (newW * 12) / 100;
+        const int secondX = x + (newW * 22) / 100;
+        const int thirdX = x + (newW * 8) / 100;
+        const int firstW = (newW * 64) / 100;
+        const int secondW = (newW * 52) / 100;
+        const int thirdW = (newW * 72) / 100;
+
+        tft.fillRoundRect(firstX, firstY, firstW, lineThickness, lineThickness / 2, color);
+        tft.fillRoundRect(secondX, secondY, secondW, lineThickness, lineThickness / 2, color);
+        tft.fillRoundRect(thirdX, thirdY, thirdW, lineThickness, lineThickness / 2, color);
+        tft.fillCircle(firstX + firstW, firstY + (lineThickness / 2), lineThickness / 2, color);
+        tft.fillCircle(secondX + secondW, secondY + (lineThickness / 2), lineThickness / 2, color);
+        tft.fillCircle(thirdX + thirdW, thirdY + (lineThickness / 2), lineThickness / 2, color);
+        tft.fillCircle(firstX + firstW + (lineThickness / 3), firstY + (lineThickness / 2), lineThickness / 2, TFT_BLACK);
+        tft.fillCircle(secondX + secondW + (lineThickness / 3), secondY + (lineThickness / 2), lineThickness / 2, TFT_BLACK);
+        tft.fillCircle(thirdX + thirdW + (lineThickness / 3), thirdY + (lineThickness / 2), lineThickness / 2, TFT_BLACK);
+    }
+
+    void drawStormIcon(int x, int y, int newW, int newH)
+    {
+        const int cloudHeight = (newH * 56) / 100;
+        const int boltTop = y + (newH * 44) / 100;
+        const int boltLeft = x + (newW * 45) / 100;
+        const int boltMid = x + (newW * 34) / 100;
+        const int boltRight = x + (newW * 60) / 100;
+        const int boltBottom = y + (newH * 88) / 100;
+
+        drawCloudIcon(x, y, newW, cloudHeight, TFT_LIGHTGREY);
+        tft.fillTriangle(boltLeft, boltTop, boltMid, y + (newH * 67) / 100, x + (newW * 49) / 100, y + (newH * 67) / 100, TFT_GOLD);
+        tft.fillTriangle(x + (newW * 52) / 100, y + (newH * 54) / 100, boltRight, y + (newH * 54) / 100, x + (newW * 42) / 100, boltBottom, TFT_GOLD);
+    }
+
     // Fixed Cloudy Icon
     const unsigned char bitmap_cloudy_64[] PROGMEM = {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -386,7 +512,11 @@ namespace
     uint16_t getIconColor(const String &iconCode)
     {
         uint16_t color;
-        if (iconCode.startsWith("01"))
+        if (iconCode == "01n")
+        {
+            color = TFT_LIGHTGREY; // Moonlit clear sky
+        }
+        else if (iconCode.startsWith("01"))
         {
             color = TFT_YELLOW; // Sunny
         }
@@ -409,41 +539,79 @@ namespace
         return color;
     }
 
-    // Select and draw the appropriate bitmap, scaled to fill the region
-    void drawScaledWeatherIcon(int x, int y, int newW, int newH, const String &iconCode)
+    bool getLocalWeatherTimeInfo(long long unixTimeUtc, long long timezoneSeconds, struct tm &timeInfo)
     {
-        const unsigned char *targetBitmap = bitmap_warning_64;
-        uint16_t iconColor = getIconColor(iconCode); // Use the revised function
-
-        if (iconCode.startsWith("01"))
+        time_t timestamp = static_cast<time_t>(unixTimeUtc + timezoneSeconds);
+        struct tm *resolvedTime = gmtime(&timestamp);
+        if (resolvedTime == nullptr)
         {
-            targetBitmap = bitmap_sunny_64;
-        }
-        else if (iconCode.startsWith("02") || iconCode.startsWith("03") || iconCode.startsWith("04"))
-        {
-            targetBitmap = bitmap_cloudy_64;
-        }
-        else if (iconCode.startsWith("09") || iconCode.startsWith("10") || iconCode.startsWith("11"))
-        {
-            targetBitmap = bitmap_rainy_64;
-        }
-        else if (iconCode.startsWith("50"))
-        {
-            targetBitmap = bitmap_windy_64;
+            return false;
         }
 
-        // Draw without masking (use corrected bitmaps)
-        drawScaledBitmap(x, y, targetBitmap, 64, 64, newW, newH, iconColor);
+        timeInfo = *resolvedTime;
+        return true;
+    }
+
+    bool shouldUseMoonIcon(const String &iconCode, long long unixTimeUtc, long long timezoneSeconds)
+    {
+        if (!iconCode.startsWith("01"))
+        {
+            return false;
+        }
+
+        struct tm localTimeInfo;
+        if (!getLocalWeatherTimeInfo(unixTimeUtc, timezoneSeconds, localTimeInfo))
+        {
+            return iconCode.endsWith("n");
+        }
+
+        return localTimeInfo.tm_hour >= 18 || localTimeInfo.tm_hour < 6;
+    }
+
+    void drawWeatherIcon(int x, int y, int newW, int newH, const String &iconCode, long long unixTimeUtc, long long timezoneSeconds)
+    {
+        const bool useMoonIcon = shouldUseMoonIcon(iconCode, unixTimeUtc, timezoneSeconds);
+        const String resolvedIconCode = useMoonIcon ? "01n" : iconCode;
+        uint16_t iconColor = getIconColor(resolvedIconCode);
+
+        if (useMoonIcon)
+        {
+            drawMoonIcon(x, y, newW, newH, iconColor);
+            return;
+        }
+        else if (resolvedIconCode.startsWith("01"))
+        {
+            drawSunIcon(x, y, newW, newH, iconColor);
+        }
+        else if (resolvedIconCode.startsWith("02") || resolvedIconCode.startsWith("03") || resolvedIconCode.startsWith("04"))
+        {
+            drawCloudIcon(x, y, newW, newH, iconColor);
+        }
+        else if (resolvedIconCode.startsWith("09") || resolvedIconCode.startsWith("10"))
+        {
+            drawRainIcon(x, y, newW, newH, iconColor);
+        }
+        else if (resolvedIconCode.startsWith("50"))
+        {
+            drawWindIcon(x, y, newW, newH, iconColor);
+        }
+        else if (resolvedIconCode.startsWith("11"))
+        {
+            drawStormIcon(x, y, newW, newH);
+        }
+        else
+        {
+            drawCloudIcon(x, y, newW, newH, TFT_WHITE);
+        }
     }
 
     String formatWeatherDate(long long unixTimeUtc, long long timezoneSeconds)
     {
-        time_t timestamp = static_cast<time_t>(unixTimeUtc + timezoneSeconds);
-        struct tm *timeInfo = gmtime(&timestamp);
         char buffer[48];
-        if (timeInfo != nullptr)
+        struct tm timeInfo;
+        if (getLocalWeatherTimeInfo(unixTimeUtc, timezoneSeconds, timeInfo))
         {
-            strftime(buffer, sizeof(buffer), "%B %d, %Y", timeInfo);
+            strftime(buffer, sizeof(buffer), "%B %d, %Y", &timeInfo);
             return String(buffer);
         }
         return "N/A";
@@ -451,12 +619,11 @@ namespace
 
     String formatWeatherTime(long long unixTimeUtc, long long timezoneSeconds)
     {
-        time_t timestamp = static_cast<time_t>(unixTimeUtc + timezoneSeconds);
-        struct tm *timeInfo = gmtime(&timestamp);
         char buffer[24];
-        if (timeInfo != nullptr)
+        struct tm timeInfo;
+        if (getLocalWeatherTimeInfo(unixTimeUtc, timezoneSeconds, timeInfo))
         {
-            strftime(buffer, sizeof(buffer), "%I:%M:%S %p", timeInfo);
+            strftime(buffer, sizeof(buffer), "%I:%M:%S %p", &timeInfo);
             return String(buffer);
         }
         return "N/A";
@@ -647,7 +814,7 @@ void renderWeatherUI(const WeatherData &data)
     tft.drawString("Humidity: " + String(data.humidity) + "%", 15, 190 - moveUpDown);
     tft.drawString("Wind: " + String(data.windSpeed) + " mph", 15, 215 - moveUpDown);
 
-    drawScaledWeatherIcon(216, 160 - moveUpDown, 96, 96, data.iconCode);
+    drawWeatherIcon(216, 140 - moveUpDown, 96, 96, data.iconCode, data.dt, data.timezoneSeconds);
 }
 
 namespace

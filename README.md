@@ -65,8 +65,14 @@ Invoke-RestMethod -Method Post -Uri "http://<device-ip>/message" `
 3. **Exit sequence (0.75 seconds):** Full screen flashes RED → WHITE → BLUE
 4. **Return to weather:** Automatically returns to weather display
 
-### Interrupting the Message
-Touch anywhere on the screen to immediately dismiss the message and return to the weather display.
+### Screen Touch Behavior
+Touch anywhere on the screen to toggle the display backlight off or on.
+
+- While the screen is off, new messages are queued in memory instead of being displayed.
+- When the screen turns back on, queued messages begin displaying immediately in arrival order.
+- While the screen is off and queued messages are waiting, the green LED blinks 500 ms on / 500 ms off for 5 seconds, then stays off for 2 seconds before repeating.
+- While the screen is off with no queued messages, the LED stays off unless WiFi is unreachable, in which case it flashes red.
+- Normal status lighting is dimmed to 50% brightness; message and error notifications use full brightness.
 
 ### Response Codes
 - `200 OK`: Message accepted and will be displayed

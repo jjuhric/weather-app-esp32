@@ -2,11 +2,14 @@
 #include <WiFi.h>
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
+#include <XPT2046_Touchscreen.h>
+#include <vector>
 #include "secrets.h"
 #include "weather_service.h"
 #include "weather_types.h"
 
 TFT_eSPI tft = TFT_eSPI();
+SPIClass touchSpi(HSPI);
 
 WeatherData weatherData;
 unsigned long lastFetchMs = 0;
@@ -20,10 +23,20 @@ constexpr int kMessageMaxY = 215;
 constexpr unsigned long kMessageBaseHoldMs = 3000UL;  // Base hold time
 constexpr unsigned long kMessageHoldMsPerLine = 1000UL;  // Additional time per line
 constexpr unsigned long kMessageFlashMs = 250UL;
+constexpr unsigned long kQueuedMessageLedBlinkWindowMs = 5000UL;
+constexpr unsigned long kQueuedMessageLedBlinkIntervalMs = 500UL;
+constexpr unsigned long kQueuedMessageLedPauseMs = 2000UL;
+constexpr unsigned long kErrorLedBlinkIntervalMs = 500UL;
+constexpr unsigned long kTouchToggleDebounceMs = 250UL;
+constexpr uint8_t kStatusLedDimBrightness = 128;
+constexpr uint8_t kStatusLedFullBrightness = 255;
+constexpr uint8_t kStatusLedPwmResolutionBits = 8;
+constexpr uint16_t kStatusLedPwmMaxDuty = (1U << kStatusLedPwmResolutionBits) - 1U;
 unsigned long messageHoldMs = 5000UL;  // Will be calculated per message
 
 WiFiServer messageServer(80);
 String pendingMessage;
+std::vector<String> queuedMessages;
 unsigned long lastMessagePollMs = 0;
 unsigned long messageDisplayStartedMs = 0;
 unsigned long messagePhaseStartedMs = 0;
@@ -36,30 +49,72 @@ DisplayMode displayMode = DisplayModeWeather;
 bool weatherRendered = false;
 bool weatherDataReady = false;
 bool messageScreenRendered = false;
+bool screenOn = true;
+bool touchActive = false;
+unsigned long lastTouchToggleMs = 0;
 
 constexpr uint8_t kStatusLedRedPin = 4;
 constexpr uint8_t kStatusLedGreenPin = 16;
 constexpr uint8_t kStatusLedBluePin = 17;
+constexpr uint8_t kTouchCsPin = 33;
+constexpr uint8_t kTouchIrqPin = 36;
+constexpr uint8_t kTouchClkPin = 25;
+constexpr uint8_t kTouchMisoPin = 39;
+constexpr uint8_t kTouchMosiPin = 32;
+constexpr uint8_t kStatusLedRedChannel = 0;
+constexpr uint8_t kStatusLedGreenChannel = 1;
+constexpr uint8_t kStatusLedBlueChannel = 2;
+constexpr uint32_t kStatusLedPwmFrequencyHz = 5000;
+XPT2046_Touchscreen touch(kTouchCsPin, kTouchIrqPin);
 
-void setStatusLedColor(bool redOn, bool greenOn, bool blueOn)
+void setStatusLedChannelBrightness(uint8_t channel, uint8_t brightness)
 {
-    digitalWrite(kStatusLedRedPin, redOn ? LOW : HIGH);
-    digitalWrite(kStatusLedGreenPin, greenOn ? LOW : HIGH);
-    digitalWrite(kStatusLedBluePin, blueOn ? LOW : HIGH);
+    const uint16_t duty = kStatusLedPwmMaxDuty - ((static_cast<uint16_t>(brightness) * kStatusLedPwmMaxDuty) / 255U);
+    ledcWrite(channel, duty);
+}
+
+void setStatusLedColor(bool redOn, bool greenOn, bool blueOn, uint8_t brightness = kStatusLedFullBrightness)
+{
+    setStatusLedChannelBrightness(kStatusLedRedChannel, redOn ? brightness : 0);
+    setStatusLedChannelBrightness(kStatusLedGreenChannel, greenOn ? brightness : 0);
+    setStatusLedChannelBrightness(kStatusLedBlueChannel, blueOn ? brightness : 0);
 }
 
 void updateStatusLed()
 {
+    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+
+    if (!screenOn) {
+        if (!wifiConnected) {
+            const bool redOn = ((millis() / kErrorLedBlinkIntervalMs) % 2) == 0;
+            setStatusLedColor(redOn, false, false);
+            return;
+        }
+
+        if (!queuedMessages.empty()) {
+            const unsigned long cycleMs = kQueuedMessageLedBlinkWindowMs + kQueuedMessageLedPauseMs;
+            const unsigned long cyclePhaseMs = millis() % cycleMs;
+            const bool greenOn = cyclePhaseMs < kQueuedMessageLedBlinkWindowMs &&
+                                 ((cyclePhaseMs / kQueuedMessageLedBlinkIntervalMs) % 2) == 0;
+            setStatusLedColor(false, greenOn, false);
+            return;
+        }
+
+        setStatusLedColor(false, false, false, 0);
+        return;
+    }
+
     if (displayMode == DisplayModeMessage) {
         const bool ledOn = ((millis() / kMessageFlashMs) % 2) == 0;
         setStatusLedColor(ledOn, false, false);
         return;
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        setStatusLedColor(false, true, false);
+    if (wifiConnected) {
+        setStatusLedColor(false, true, false, kStatusLedDimBrightness);
     } else {
-        setStatusLedColor(true, false, false);
+        const bool redOn = ((millis() / kErrorLedBlinkIntervalMs) % 2) == 0;
+        setStatusLedColor(redOn, false, false);
     }
 }
 
@@ -114,10 +169,107 @@ bool validateMessageWrapping(const String& message) {
     return calculateMessageLineCount(message) <= kMaxMessageLines;
 }
 
+unsigned long calculateMessageHoldDurationMs(const String& message) {
+    return kMessageBaseHoldMs + (calculateMessageLineCount(message) * kMessageHoldMsPerLine);
+}
+
 void resetMessageDisplay() {
     messageDisplayStartedMs = millis();
     messagePhaseStartedMs = millis();
     messagePhase = 0;
+}
+
+void setBacklightEnabled(bool enabled) {
+    digitalWrite(TFT_BL, enabled ? TFT_BACKLIGHT_ON : (TFT_BACKLIGHT_ON == HIGH ? LOW : HIGH));
+}
+
+void startMessageDisplay(const String& message) {
+    pendingMessage = message;
+    messageHoldMs = calculateMessageHoldDurationMs(message);
+    displayMode = DisplayModeMessage;
+    messageScreenRendered = false;
+    resetMessageDisplay();
+}
+
+void queueMessage(const String& message) {
+    queuedMessages.push_back(message);
+}
+
+void queueMessageAtFront(const String& message) {
+    queuedMessages.insert(queuedMessages.begin(), message);
+}
+
+bool startNextQueuedMessage() {
+    if (!screenOn || queuedMessages.empty()) {
+        return false;
+    }
+
+    String nextMessage = queuedMessages.front();
+    queuedMessages.erase(queuedMessages.begin());
+    startMessageDisplay(nextMessage);
+    return true;
+}
+
+void returnToWeatherDisplay() {
+    displayMode = DisplayModeWeather;
+    pendingMessage = "";
+    messageScreenRendered = false;
+
+    if (screenOn && weatherDataReady) {
+        renderWeatherUI(weatherData);
+        weatherRendered = true;
+    }
+}
+
+void turnScreenOff() {
+    if (!screenOn) {
+        return;
+    }
+
+    if (displayMode == DisplayModeMessage && !pendingMessage.isEmpty()) {
+        queueMessageAtFront(pendingMessage);
+        pendingMessage = "";
+        displayMode = DisplayModeWeather;
+        messageScreenRendered = false;
+    }
+
+    screenOn = false;
+    setBacklightEnabled(false);
+}
+
+void turnScreenOn() {
+    if (screenOn) {
+        return;
+    }
+
+    screenOn = true;
+    setBacklightEnabled(true);
+
+    if (startNextQueuedMessage()) {
+        return;
+    }
+
+    if (weatherDataReady) {
+        renderWeatherUI(weatherData);
+        weatherRendered = true;
+    }
+}
+
+void handleScreenTouchToggle() {
+    const bool isTouched = touch.tirqTouched() && touch.touched();
+
+    if (isTouched && !touchActive && (millis() - lastTouchToggleMs >= kTouchToggleDebounceMs)) {
+        touchActive = true;
+        lastTouchToggleMs = millis();
+        if (screenOn) {
+            turnScreenOff();
+        } else {
+            turnScreenOn();
+        }
+        updateStatusLed();
+    } else if (!isTouched) {
+        touchActive = false;
+    }
 }
 
 // Display message with proper word wrapping (24 chars per line, 10 lines max)
@@ -286,14 +438,11 @@ bool handleHttpRequest() {
         return true;
     }
 
-    // Calculate hold time: 3 seconds base + 1 second per line
-    int lineCount = calculateMessageLineCount(messageValue);
-    messageHoldMs = kMessageBaseHoldMs + (lineCount * kMessageHoldMsPerLine);
-
-    pendingMessage = messageValue;
-    displayMode = DisplayModeMessage;
-    messageScreenRendered = false;
-    resetMessageDisplay();
+    if (screenOn) {
+        startMessageDisplay(messageValue);
+    } else {
+        queueMessage(messageValue);
+    }
     updateStatusLed();
 
     sendJsonResponse(client, "HTTP/1.1 200 OK", "{\"ok\":true}");
@@ -303,12 +452,21 @@ bool handleHttpRequest() {
 
 void setup() {
     Serial.begin(115200);
-    pinMode(kStatusLedRedPin, OUTPUT);
-    pinMode(kStatusLedGreenPin, OUTPUT);
-    pinMode(kStatusLedBluePin, OUTPUT);
+    pinMode(TFT_BL, OUTPUT);
+    pinMode(kTouchIrqPin, INPUT);
+    ledcSetup(kStatusLedRedChannel, kStatusLedPwmFrequencyHz, kStatusLedPwmResolutionBits);
+    ledcSetup(kStatusLedGreenChannel, kStatusLedPwmFrequencyHz, kStatusLedPwmResolutionBits);
+    ledcSetup(kStatusLedBlueChannel, kStatusLedPwmFrequencyHz, kStatusLedPwmResolutionBits);
+    ledcAttachPin(kStatusLedRedPin, kStatusLedRedChannel);
+    ledcAttachPin(kStatusLedGreenPin, kStatusLedGreenChannel);
+    ledcAttachPin(kStatusLedBluePin, kStatusLedBlueChannel);
     setStatusLedColor(false, false, false);
+    setBacklightEnabled(true);
     tft.init();
-    tft.setRotation(1);
+    tft.setRotation(ROTATE_SCREEN_180);
+    touchSpi.begin(kTouchClkPin, kTouchMisoPin, kTouchMosiPin, kTouchCsPin);
+    touch.begin(touchSpi);
+    touch.setRotation(ROTATE_SCREEN_180);
     tft.fillScreen(TFT_BLACK);
     updateStatusLed();
 
@@ -339,6 +497,22 @@ void loop() {
     if (millis() - lastMessagePollMs >= 250 && WiFi.status() == WL_CONNECTED) {
         handleHttpRequest();
         lastMessagePollMs = millis();
+    }
+
+    handleScreenTouchToggle();
+
+    if (!screenOn) {
+        if (millis() - lastFetchMs >= kRefreshIntervalMs) {
+            if (WiFi.status() == WL_CONNECTED) {
+                String statusMessage;
+                if (fetchWeatherData(weatherData, statusMessage)) {
+                    weatherDataReady = true;
+                    weatherRendered = false;
+                }
+            }
+            lastFetchMs = millis();
+        }
+        return;
     }
 
     if (displayMode == DisplayModeMessage) {
@@ -379,22 +553,12 @@ void loop() {
             } else if (millis() - messagePhaseStartedMs < kMessageFlashMs * 3) {
                 tft.fillScreen(TFT_BLUE);
             } else {
-                displayMode = DisplayModeWeather;
-                messageScreenRendered = false;
-                if (weatherDataReady) {
-                    renderWeatherUI(weatherData);
+                pendingMessage = "";
+                if (!startNextQueuedMessage()) {
+                    returnToWeatherDisplay();
                 }
+                updateStatusLed();
                 return;
-            }
-        }
-
-        uint16_t touchX = 0;
-        uint16_t touchY = 0;
-        if (tft.getTouch(&touchX, &touchY, 600)) {
-            displayMode = DisplayModeWeather;
-            messageScreenRendered = false;
-            if (weatherDataReady) {
-                renderWeatherUI(weatherData);
             }
         }
         return;
@@ -410,8 +574,12 @@ void loop() {
             String statusMessage;
             if (fetchWeatherData(weatherData, statusMessage)) {
                 weatherDataReady = true;
-                renderWeatherUI(weatherData);
-                weatherRendered = true;
+                if (displayMode == DisplayModeWeather) {
+                    renderWeatherUI(weatherData);
+                    weatherRendered = true;
+                } else {
+                    weatherRendered = false;
+                }
             } else if (!statusMessage.isEmpty()) {
                 displayCenteredStatusMessage(statusMessage, TFT_RED);
             }
