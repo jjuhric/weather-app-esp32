@@ -11,3 +11,4 @@ bool isInternetReachable(uint16_t timeoutMs = 1500);
 bool fetchWeatherData(WeatherData& data, String& statusMessage);
 void renderWeatherUI(const WeatherData& data);
 void displayStatusMessage(const String& message, uint16_t color);
+void displayCenteredStatusMessage(const String& message, uint16_t color);

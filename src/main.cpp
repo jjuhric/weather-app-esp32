@@ -37,6 +37,32 @@ bool weatherRendered = false;
 bool weatherDataReady = false;
 bool messageScreenRendered = false;
 
+constexpr uint8_t kStatusLedRedPin = 4;
+constexpr uint8_t kStatusLedGreenPin = 16;
+constexpr uint8_t kStatusLedBluePin = 17;
+
+void setStatusLedColor(bool redOn, bool greenOn, bool blueOn)
+{
+    digitalWrite(kStatusLedRedPin, redOn ? LOW : HIGH);
+    digitalWrite(kStatusLedGreenPin, greenOn ? LOW : HIGH);
+    digitalWrite(kStatusLedBluePin, blueOn ? LOW : HIGH);
+}
+
+void updateStatusLed()
+{
+    if (displayMode == DisplayModeMessage) {
+        const bool ledOn = ((millis() / kMessageFlashMs) % 2) == 0;
+        setStatusLedColor(ledOn, false, false);
+        return;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        setStatusLedColor(false, true, false);
+    } else {
+        setStatusLedColor(true, false, false);
+    }
+}
+
 // Calculate how many lines a message will take when word-wrapped (24 chars per line, 10 lines max)
 int calculateMessageLineCount(const String& message) {
     if (message.isEmpty()) {
@@ -268,6 +294,7 @@ bool handleHttpRequest() {
     displayMode = DisplayModeMessage;
     messageScreenRendered = false;
     resetMessageDisplay();
+    updateStatusLed();
 
     sendJsonResponse(client, "HTTP/1.1 200 OK", "{\"ok\":true}");
     client.stop();
@@ -276,14 +303,20 @@ bool handleHttpRequest() {
 
 void setup() {
     Serial.begin(115200);
+    pinMode(kStatusLedRedPin, OUTPUT);
+    pinMode(kStatusLedGreenPin, OUTPUT);
+    pinMode(kStatusLedBluePin, OUTPUT);
+    setStatusLedColor(false, false, false);
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
+    updateStatusLed();
 
-    displayStatusMessage("Connecting to WiFi...", TFT_YELLOW);
+    displayCenteredStatusMessage("Connecting to WiFi...", TFT_YELLOW);
     if (connectToWiFi(WIFI_SSID, WIFI_PASSWORD)) {
         messageServer.begin();
-        displayStatusMessage("Connected!", TFT_GREEN);
+        updateStatusLed();
+        displayCenteredStatusMessage("Connected!", TFT_GREEN);
         delay(1000);
         String statusMessage;
         if (fetchWeatherData(weatherData, statusMessage)) {
@@ -291,16 +324,18 @@ void setup() {
             renderWeatherUI(weatherData);
             weatherRendered = true;
         } else if (!statusMessage.isEmpty()) {
-            displayStatusMessage(statusMessage, TFT_RED);
+            displayCenteredStatusMessage(statusMessage, TFT_RED);
         }
     } else {
-        displayStatusMessage("WiFi Connect Failed", TFT_RED);
+        displayCenteredStatusMessage("WiFi Connect Failed", TFT_RED);
     }
 
     lastFetchMs = millis();
 }
 
 void loop() {
+    updateStatusLed();
+
     if (millis() - lastMessagePollMs >= 250 && WiFi.status() == WL_CONNECTED) {
         handleHttpRequest();
         lastMessagePollMs = millis();
@@ -378,7 +413,7 @@ void loop() {
                 renderWeatherUI(weatherData);
                 weatherRendered = true;
             } else if (!statusMessage.isEmpty()) {
-                displayStatusMessage(statusMessage, TFT_RED);
+                displayCenteredStatusMessage(statusMessage, TFT_RED);
             }
         }
         lastFetchMs = millis();
