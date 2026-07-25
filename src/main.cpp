@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
 #include <XPT2046_Touchscreen.h>
@@ -512,7 +514,40 @@ void setup() {
         messageServer.begin();
         updateStatusLed();
         displayCenteredStatusMessage("Connected!", TFT_GREEN);
+
+        if (MDNS.begin("esp32-weather")) {
+            Serial.println("MDNS responder started");
+        }
+
         delay(1000);
+
+        // Configure and start OTA
+        ArduinoOTA.setHostname("esp32-weather");
+        ArduinoOTA.setPassword(OTA_UPDATE_PASSWORD);
+
+        ArduinoOTA.onStart([]() {
+            displayCenteredStatusMessage("Updating...", TFT_CYAN);
+        });
+        ArduinoOTA.onEnd([]() {
+            displayCenteredStatusMessage("Update Complete!", TFT_GREEN);
+        });
+        ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+            char buffer[30];
+            snprintf(buffer, sizeof(buffer), "Progress: %u%%", (progress / (total / 100)));
+            displayCenteredStatusMessage(buffer, TFT_CYAN);
+        });
+        ArduinoOTA.onError([](ota_error_t error) {
+            char buffer[30];
+            snprintf(buffer, sizeof(buffer), "Error[%u]:", error);
+            if (error == OTA_AUTH_ERROR) displayCenteredStatusMessage("Auth Failed", TFT_RED);
+            else if (error == OTA_BEGIN_ERROR) displayCenteredStatusMessage("Begin Failed", TFT_RED);
+            else if (error == OTA_CONNECT_ERROR) displayCenteredStatusMessage("Connect Failed", TFT_RED);
+            else if (error == OTA_RECEIVE_ERROR) displayCenteredStatusMessage("Receive Failed", TFT_RED);
+            else if (error == OTA_END_ERROR) displayCenteredStatusMessage("End Failed", TFT_RED);
+        });
+
+        ArduinoOTA.begin();
+
         String statusMessage;
         if (fetchWeatherData(weatherData, statusMessage)) {
             weatherDataReady = true;
@@ -529,6 +564,7 @@ void setup() {
 }
 
 void loop() {
+    ArduinoOTA.handle();
     updateStatusLed();
 
     if (millis() - lastMessagePollMs >= 250 && WiFi.status() == WL_CONNECTED) {
